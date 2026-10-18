@@ -1300,7 +1300,7 @@ def list_examples() -> None:
     infos = _example_infos()
     if not infos:
         typer.echo("No bundled examples were found.")
-        typer.echo("  https://github.com/marmar9615-cloud/stui-terminal/tree/main/examples")
+        typer.echo("  https://github.com/MarMarLabs/stui-terminal/tree/main/examples")
         return
 
     typer.echo("stui examples:")

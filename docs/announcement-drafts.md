@@ -6,7 +6,7 @@ the GitHub Release exists, and the README/PyPI screenshot still renders.
 
 ## X Post Draft
 
-I shipped `stui` v1.0.0 from MarMar Labs.
+I shipped `stui` v1.0.0 from MarMarLabs.
 
 It is a small Streamlit-inspired Python UI framework for terminal-native apps,
 built on Textual.
@@ -42,18 +42,18 @@ Streamlit compatibility layer. It is a small terminal-first API for local tools,
 SSH/headless workflows, model/debug panels, and quick demos.
 
 Repo:
-https://github.com/marmar9615-cloud/stui-terminal
+https://github.com/MarMarLabs/stui-terminal
 
 ## X Thread Draft
 
-1. I shipped `stui` v1.0.0 from MarMar Labs.
+1. I shipped `stui` v1.0.0 from MarMarLabs.
 
 It is a small Streamlit-inspired Python UI framework for terminal-native apps,
 built on Textual.
 
 No browser. No ports. No local web server. No Streamlit runtime dependency.
 
-https://github.com/marmar9615-cloud/stui-terminal
+https://github.com/MarMarLabs/stui-terminal
 
 2. Install from PyPI as `stui-terminal`:
 
@@ -112,11 +112,11 @@ It does not depend on Streamlit at runtime.
 - What should stay out of scope so the project stays small?
 
 Repo:
-https://github.com/marmar9615-cloud/stui-terminal
+https://github.com/MarMarLabs/stui-terminal
 
 ## LinkedIn Post
 
-I shipped `stui` v1.0.0 from MarMar Labs.
+I shipped `stui` v1.0.0 from MarMarLabs.
 
 `stui` is a small Streamlit-inspired Python UI framework for building
 terminal-native apps with Textual.
@@ -165,13 +165,13 @@ I would love feedback from people who build local tools, AI/model workflows,
 internal CLIs, SSH/headless workflows, or terminal-first prototypes.
 
 Repo:
-https://github.com/marmar9615-cloud/stui-terminal
+https://github.com/MarMarLabs/stui-terminal
 
 ## GitHub Discussion Feedback Post
 
 Title: `stui` v1.0.0 feedback thread
 
-I shipped `stui` v1.0.0 from MarMar Labs and would love feedback from builders
+I shipped `stui` v1.0.0 from MarMarLabs and would love feedback from builders
 who might use a small Python UI framework directly in the terminal.
 
 `stui` is Streamlit-inspired, but it is not official Streamlit, not affiliated
@@ -227,7 +227,7 @@ Feedback I would especially appreciate:
 - What should stay out of scope so the project remains small and readable?
 
 Repo:
-https://github.com/marmar9615-cloud/stui-terminal
+https://github.com/MarMarLabs/stui-terminal
 
 ## Short Dev-Community Reply Post
 

@@ -9,7 +9,7 @@ description = "A tiny Streamlit-inspired terminal UI experiment."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "MarMar Labs" }]
+authors = [{ name = "MarMarLabs" }]
 keywords = ["terminal", "tui", "textual", "streamlit-inspired"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
