@@ -1,6 +1,6 @@
 # stui
 
-[![CI](https://github.com/marmar9615-cloud/stui-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/marmar9615-cloud/stui-terminal/actions/workflows/ci.yml)
+[![CI](https://github.com/MarMarLabs/stui-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/MarMarLabs/stui-terminal/actions/workflows/ci.yml)
 
 `stui` is a small Streamlit-inspired framework for building terminal-native
 Python apps. Write a short script, run it in your terminal, and get a Textual UI
@@ -30,18 +30,18 @@ The explorer browses the displayed snapshot within `max_rows` and `max_cols`.
 Search and sorting do not rerun your script. See
 [interactive data](docs/interactive-data.md#fullscreen-explorer) for controls.
 
-![Fullscreen data explorer with numeric sorting and row details](https://raw.githubusercontent.com/marmar9615-cloud/stui-terminal/v2.4.0/assets/stui-data-explorer.svg)
+![Fullscreen data explorer with numeric sorting and row details](https://raw.githubusercontent.com/MarMarLabs/stui-terminal/v2.4.0/assets/stui-data-explorer.svg)
 
 These are real Textual captures from the bundled v2.3 `workspace` demo after
 driving the documented keyboard interactions. They are not mockups.
 
-![stui workspace data tab with a selected row](https://raw.githubusercontent.com/marmar9615-cloud/stui-terminal/v2.3.0/assets/stui-workspace.png)
+![stui workspace data tab with a selected row](https://raw.githubusercontent.com/MarMarLabs/stui-terminal/v2.3.0/assets/stui-workspace.png)
 
 | Narrow terminal | Local path input |
 | --- | --- |
-| ![stui workspace at 38 by 22 cells](https://raw.githubusercontent.com/marmar9615-cloud/stui-terminal/v2.3.0/assets/stui-workspace-narrow.png) | ![stui local path input in the Files tab](https://raw.githubusercontent.com/marmar9615-cloud/stui-terminal/v2.3.0/assets/stui-path-input.png) |
+| ![stui workspace at 38 by 22 cells](https://raw.githubusercontent.com/MarMarLabs/stui-terminal/v2.3.0/assets/stui-workspace-narrow.png) | ![stui local path input in the Files tab](https://raw.githubusercontent.com/MarMarLabs/stui-terminal/v2.3.0/assets/stui-path-input.png) |
 
-![stui safe command palette with tab, diagnostics, cache, focus, theme, rerun, and quit actions](https://raw.githubusercontent.com/marmar9615-cloud/stui-terminal/v2.3.0/assets/stui-command-palette.png)
+![stui safe command palette with tab, diagnostics, cache, focus, theme, rerun, and quit actions](https://raw.githubusercontent.com/MarMarLabs/stui-terminal/v2.3.0/assets/stui-command-palette.png)
 
 The exact interaction and capture evidence is recorded in
 [`docs/visual-proof.md`](docs/visual-proof.md).
