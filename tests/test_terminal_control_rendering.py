@@ -178,7 +178,7 @@ def test_slider_label_and_help_make_controls_visible_before_textual_render(
     assert OSC not in slider.label
     assert CSI not in slider.label
     assert C1_CSI not in slider.label
-    assert slider.tooltip == "Help " + PAYLOAD.replace("\x1b", "\\x1b").replace(
+    assert slider.tooltip.plain == "Help " + PAYLOAD.replace("\x1b", "\\x1b").replace(
         "\x9b", "\\x9b"
     )
 
@@ -199,7 +199,8 @@ def test_watch_notification_makes_malicious_filename_controls_visible(
     async def rerun() -> None:
         return None
 
-    def notify(message: str, *, severity: str, timeout: int) -> None:
+    def notify(message: str, *, severity: str, timeout: int, markup: bool) -> None:
+        assert markup is False
         notifications.append((message, severity))
 
     app.action_rerun_script = rerun
