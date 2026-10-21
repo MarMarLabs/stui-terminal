@@ -314,3 +314,81 @@ def test_generators_reject_junction_parent(generator, tmp_path, force):
         assert destination.read_text(encoding="utf-8") == "# keep me\n"
     finally:
         junction.rmdir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows reparse-point mutation")
+def test_windows_publish_cannot_be_redirected_by_in_place_junction(
+    generator, tmp_path, monkeypatch,
+):
+    import ctypes
+    import struct
+    from ctypes import wintypes
+
+    args, destination = generator
+    redirected = tmp_path / "redirected"
+    redirected.mkdir()
+    victim = redirected / destination.name
+    victim.write_text("# keep me\n", encoding="utf-8")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    )
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    control = kernel.DeviceIoControl
+    control.argtypes = (
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPVOID,
+    )
+    control.restype = wintypes.BOOL
+    substitute = ("\\??\\" + str(redirected)).encode("utf-16-le")
+    printed = str(redirected).encode("utf-16-le")
+    names = substitute + b"\0\0" + printed + b"\0\0"
+    payload = struct.pack(
+        "<IHHHHHH", 0xA0000003, 8 + len(names), 0,
+        0, len(substitute), len(substitute) + 2, len(printed),
+    ) + names
+
+    def make_junction(path):
+        handle = create(str(path), 0x40000000, 7, None, 3, 0x02200000, None)
+        assert handle != wintypes.HANDLE(-1).value
+        try:
+            buffer = ctypes.create_string_buffer(payload)
+            returned = wintypes.DWORD()
+            succeeded = control(
+                handle, 0x900A4, buffer, len(payload),
+                None, 0, ctypes.byref(returned), None,
+            )
+            return bool(succeeded), ctypes.get_last_error()
+        finally:
+            close(handle)
+
+    empty_control = tmp_path / "empty-control"
+    empty_control.mkdir()
+    assert make_junction(empty_control)[0]
+    empty_control.rmdir()
+    attempted = False
+
+    def attack_publish(source, target, **kwargs):
+        nonlocal attempted
+        attempted = True
+        os.unlink(source)
+        guards = list(destination.parent.glob("*.guard"))
+        assert len(guards) == 1
+        with pytest.raises(PermissionError):
+            guards[0].unlink()
+        assert make_junction(destination.parent) == (False, 145)
+        raise FileNotFoundError("attacker removed the staging entry")
+
+    monkeypatch.setattr(os, "replace", attack_publish)
+    result = CliRunner().invoke(cli.app, args + ["--force"])
+
+    assert attempted
+    assert isinstance(result.exception, FileNotFoundError)
+    assert victim.read_text(encoding="utf-8") == "# keep me\n"
+    assert not list(destination.parent.iterdir())

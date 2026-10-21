@@ -15,6 +15,7 @@ from pathlib import Path
 class _Directory:
     path: Path
     fd: int | None
+    lock: ExitStack | None = None
 
     def entry(self, name: str) -> str | Path:
         return name if self.fd is not None else self.path / name
@@ -42,7 +43,9 @@ def _windows_kernel():
     return kernel
 
 
-def _pin_windows_directory(path: Path, stack: ExitStack) -> _Directory:
+def _pin_windows_directory(
+    path: Path, stack: ExitStack, *, share_write: bool = False,
+) -> _Directory:
     # Python's dir_fd operations are unavailable on Windows. Keep every ancestor
     # open without write/delete sharing instead, including while publishing.
     import ctypes
@@ -51,10 +54,14 @@ def _pin_windows_directory(path: Path, stack: ExitStack) -> _Directory:
     kernel = _windows_kernel()
     # OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT.
     # FILE_TRAVERSE participates in sharing checks; metadata-only access does not.
-    handle = kernel.CreateFileW(str(path), 0x20, 1, None, 3, 0x02200000, None)
+    handle = kernel.CreateFileW(
+        str(path), 0x20, 3 if share_write else 1, None, 3, 0x02200000, None,
+    )
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
-    stack.callback(kernel.CloseHandle, handle)
+    lock = ExitStack()
+    lock.callback(kernel.CloseHandle, handle)
+    stack.callback(lock.close)
     attributes = (wintypes.DWORD * 2)()
     # FileAttributeTagInfo = 9; reject junctions and other reparse points.
     if not kernel.GetFileInformationByHandleEx(
@@ -63,7 +70,7 @@ def _pin_windows_directory(path: Path, stack: ExitStack) -> _Directory:
         raise ctypes.WinError(ctypes.get_last_error())
     if attributes[0] & 0x400 or not attributes[0] & 0x10:
         raise NotADirectoryError(f"not a plain directory: {path}")
-    return _Directory(path, None)
+    return _Directory(path, None, lock)
 
 
 def _create_file(directory: _Directory, name: str) -> int:
@@ -72,6 +79,12 @@ def _create_file(directory: _Directory, name: str) -> int:
             directory.entry(name), os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             0o666, dir_fd=directory.fd,
         )
+    return _create_windows_file(directory, name)
+
+
+def _create_windows_file(
+    directory: _Directory, name: str, *, delete_on_close: bool = False,
+) -> int:
     import ctypes
     import msvcrt
     from ctypes import wintypes
@@ -79,8 +92,10 @@ def _create_file(directory: _Directory, name: str) -> int:
     kernel = _windows_kernel()
     # GENERIC_WRITE, FILE_SHARE_READ, CREATE_NEW, OPEN_REPARSE_POINT | NORMAL.
     # The CRT's os.open can follow a dangling symlink despite O_EXCL.
+    access = 0x40000000 | (0x10000 if delete_on_close else 0)
+    flags = 0x00200080 | (0x04000000 if delete_on_close else 0)
     handle = kernel.CreateFileW(
-        str(directory.entry(name)), 0x40000000, 1, None, 1, 0x00200080, None,
+        str(directory.entry(name)), access, 1, None, 1, flags, None,
     )
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -181,6 +196,7 @@ def write_generated_file(
         else:
             temporary = f".stui-{secrets.token_hex(16)}.tmp"
             fd = _create_file(directory, temporary)
+            guard_fd = None
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as output:
                     if (
@@ -189,13 +205,31 @@ def write_generated_file(
                     ):
                         os.fchmod(output.fileno(), existing.st_mode & 0o777)
                     output.write(content)
+                if os.name == "nt":
+                    # MoveFileEx opens the final parent for writing. Retain its
+                    # delete lock, and prevent in-place junction conversion with
+                    # an undeletable entry (reparse directories must be empty).
+                    guard_fd = _create_windows_file(
+                        directory, f".stui-{secrets.token_hex(16)}.guard",
+                        delete_on_close=True,
+                    )
+                    shared = _pin_windows_directory(
+                        directory.path, stack, share_write=True,
+                    )
+                    assert directory.lock is not None
+                    directory.lock.close()
+                    directory = shared
                 os.replace(
                     directory.entry(temporary), directory.entry(name),
                     src_dir_fd=directory.fd, dst_dir_fd=directory.fd,
                 )
             finally:
                 try:
-                    os.unlink(directory.entry(temporary), dir_fd=directory.fd)
-                except FileNotFoundError:
-                    pass
+                    try:
+                        os.unlink(directory.entry(temporary), dir_fd=directory.fd)
+                    except FileNotFoundError:
+                        pass
+                finally:
+                    if guard_fd is not None:
+                        os.close(guard_fd)
     return path
