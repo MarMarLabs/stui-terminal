@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from . import __version__
+from ._file_generation import write_generated_file
 from ._terminal_text import visible_terminal_text
 from .app import StuiApp, resolve_theme
 from .diagnostics import inspect_script
@@ -1363,19 +1364,12 @@ def copy_example(
     example_name = _example_name(name)
     content = _read_bundled_example(name)
     dest_path = dest.expanduser()
-    if dest_path.is_dir():
-        dest_path = dest_path / example_name
-        if dest_path.exists() and not force:
-            raise typer.BadParameter(f"destination exists: {dest_path}")
-    elif dest_path.suffix == "":
-        dest_path.mkdir(parents=True, exist_ok=True)
-        dest_path = dest_path / example_name
-        if dest_path.exists() and not force:
-            raise typer.BadParameter(f"destination exists: {dest_path}")
-    elif dest_path.exists() and not force:
-        raise typer.BadParameter(f"destination exists: {dest}")
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    dest_path.write_text(content, encoding="utf-8")
+    try:
+        dest_path = write_generated_file(
+            dest_path, content, force=force, directory_filename=example_name,
+        )
+    except FileExistsError as error:
+        raise typer.BadParameter(f"destination exists: {dest_path}") from error
     typer.echo(f"Copied {example_name} to {dest_path}")
 
 
@@ -1404,7 +1398,7 @@ def init_app(
     """Create a small starter stui app."""
 
     script_path = script.expanduser()
-    if script_path.exists() and script_path.is_dir():
+    if script_path.is_dir() and not script_path.is_symlink():
         raise typer.BadParameter(f"not a file: {script}")
     if script_path.suffix != ".py":
         raise typer.BadParameter(f"script must be a .py file: {script}")
@@ -1413,11 +1407,14 @@ def init_app(
         raise typer.BadParameter(
             f"unknown template '{template}'. Choose one of: {choices}"
         )
-    if script_path.exists() and not force:
-        raise typer.BadParameter(f"file exists: {script}")
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(
-        INIT_TEMPLATES[template].format(filename=script_path.name),
-        encoding="utf-8",
-    )
+    try:
+        write_generated_file(
+            script_path,
+            INIT_TEMPLATES[template].format(filename=script_path.name),
+            force=force,
+        )
+    except FileExistsError as error:
+        raise typer.BadParameter(f"file exists: {script}") from error
+    except IsADirectoryError as error:
+        raise typer.BadParameter(f"not a file: {script}") from error
     typer.echo(f"Created {script_path} from the {template} template")

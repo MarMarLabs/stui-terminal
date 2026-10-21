@@ -7,6 +7,7 @@ from os import terminal_size
 from pathlib import Path
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 import stui
@@ -493,7 +494,7 @@ def test_check_missing_repo_example_preserves_multiline_guidance(
     assert result.exit_code == 2
     assert "Bundled examples are available after installation" in result.output
     assert "stui example copy basic examples/basic.py" in " ".join(
-        result.output.replace("│", "").split()
+        Text.from_ansi(result.output).plain.replace("│", "").split()
     )
     assert "\\x0a" not in result.output
 
