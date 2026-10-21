@@ -604,15 +604,21 @@ def check_app(
         if exit_code:
             raise typer.Exit(exit_code)
         return
+    display_path = _inspect_display_text(script_path)
     if payload["status"] == "invalid_script":
-        raise typer.BadParameter(str(error["traceback"]) if error else "")
+        message = (
+            str(error["traceback"]).replace(str(script_path), display_path)
+            if error
+            else ""
+        )
+        raise typer.BadParameter(visible_terminal_text(message))
     if error:
-        typer.echo(f"stui check failed: {script_path}")
-        typer.echo(error["traceback"])
+        typer.echo(f"stui check failed: {display_path}")
+        typer.echo(visible_terminal_text(error["traceback"]))
     elif strict and warnings:
         element_count = int(summary["element_count"])
         typer.echo(
-            f"stui check strict failed: {script_path} "
+            f"stui check strict failed: {display_path} "
             f"({element_count} rendered element{'s' if element_count != 1 else ''}"
             f"{repeat_suffix})"
         )
@@ -620,7 +626,7 @@ def check_app(
         element_count = int(summary["element_count"])
         status_label = "passed with warnings" if warnings else "passed"
         typer.echo(
-            f"stui check {status_label}: {script_path} "
+            f"stui check {status_label}: {display_path} "
             f"({element_count} rendered element{'s' if element_count != 1 else ''}"
             f"{repeat_suffix})"
         )
