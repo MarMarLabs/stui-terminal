@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import zipfile
 from os import terminal_size
 from pathlib import Path
 
@@ -146,7 +147,9 @@ def test_demo_list_reports_when_no_bundled_resources(monkeypatch) -> None:
     assert "No bundled demos were found" in result.output
 
 
-def test_demo_launches_valid_bundled_demo(monkeypatch) -> None:
+@pytest.mark.parametrize("name", cli.DEMO_NAMES)
+@pytest.mark.parametrize("suffix", ["", ".py"])
+def test_demo_launches_valid_bundled_demo(monkeypatch, name: str, suffix: str) -> None:
     launched: list[Path] = []
 
     class FakeRuntime:
@@ -163,12 +166,93 @@ def test_demo_launches_valid_bundled_demo(monkeypatch) -> None:
     monkeypatch.setattr(cli, "Runtime", FakeRuntime)
     monkeypatch.setattr(cli, "StuiApp", FakeApp)
 
-    result = CliRunner().invoke(cli.app, ["demo", "dashboard"])
+    result = CliRunner().invoke(cli.app, ["demo", f"{name}{suffix}"])
 
     assert result.exit_code == 0
-    assert [path.name for path in launched] == ["dashboard.py"]
+    assert [path.name for path in launched] == [f"{name}.py"]
     assert launched[0].exists()
     assert "stui/examples" in launched[0].as_posix()
+
+
+@pytest.mark.parametrize("name", ["basic", "basic.py"])
+def test_demo_resolves_zip_package_resource(
+    monkeypatch, tmp_path: Path, name: str
+) -> None:
+    archive_path = tmp_path / "examples.zip"
+    content = "# bundled demo\n"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("examples/basic.py", content)
+
+    with zipfile.ZipFile(archive_path) as archive:
+        bundled = zipfile.Path(archive, "examples/")
+        monkeypatch.setattr(cli.resources, "files", lambda _package: bundled)
+
+        resource = cli._bundled_demo_resource(name)
+
+        with cli.resources.as_file(resource) as script:
+            assert script.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("name", cli.DEMO_NAMES)
+@pytest.mark.parametrize("suffix", ["", ".py"])
+@pytest.mark.parametrize("path_kind", ["absolute", "parent"])
+def test_demo_rejects_external_script(
+    monkeypatch, tmp_path: Path, name: str, suffix: str, path_kind: str
+) -> None:
+    bundled = tmp_path / "examples"
+    bundled.mkdir()
+    marker = tmp_path / "executed"
+    script = tmp_path / f"{name}.py"
+    script.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli.resources, "files", lambda _package: bundled)
+
+    class FakeApp:
+        def __init__(self, runtime: Runtime) -> None:
+            self.runtime = runtime
+
+        def run(self) -> None:
+            self.runtime.run_script()
+
+    monkeypatch.setattr(cli, "StuiApp", FakeApp)
+    argument = (
+        str(tmp_path / f"{name}{suffix}")
+        if path_kind == "absolute"
+        else f"../{name}{suffix}"
+    )
+
+    result = CliRunner().invoke(cli.app, ["demo", argument])
+
+    assert result.exit_code == 2
+    assert "unknown demo" in " ".join(result.output.split())
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "./basic",
+        "./basic.py",
+        "nested/../basic.py",
+        "nested/basic.py",
+        r"..\basic.py",
+        r"C:\demos\basic.py",
+        r"C:basic.py",
+        r"\\server\demos\basic.py",
+    ],
+)
+def test_demo_rejects_path_aliases(monkeypatch, name: str) -> None:
+    def unexpected_runtime(_path):
+        pytest.fail("a path alias must not reach Runtime")
+
+    monkeypatch.setattr(cli, "Runtime", unexpected_runtime)
+
+    result = CliRunner().invoke(cli.app, ["demo", name])
+
+    assert result.exit_code == 2
+    assert "unknown demo" in " ".join(result.output.split())
 
 
 def test_demo_rejects_invalid_demo_name() -> None:

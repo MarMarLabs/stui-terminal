@@ -271,7 +271,7 @@ def _read_bundled_example(name: str) -> str:
 
 def _bundled_demo_resource(name: str):
     demo_name = _example_name(name)
-    if Path(demo_name).stem not in DEMO_NAMES:
+    if demo_name not in {_example_name(demo) for demo in DEMO_NAMES}:
         choices = ", ".join(DEMO_NAMES)
         raise typer.BadParameter(
             f"unknown demo '{name}'. Run `stui demo list` to see names. "
