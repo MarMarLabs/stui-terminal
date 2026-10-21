@@ -220,14 +220,23 @@ def test_generators_reject_symlinked_parent(generator, tmp_path, force):
 
 
 @pytest.mark.parametrize("directory_name", [".", "..", "nested", "dotted.py"])
-def test_copy_directory_path_forms(tmp_path, monkeypatch, directory_name):
+@pytest.mark.parametrize("force", [False, True])
+def test_copy_directory_path_forms(tmp_path, monkeypatch, directory_name, force):
     working = tmp_path / "working"
     working.mkdir()
     monkeypatch.chdir(working)
     if directory_name == "dotted.py":
         (working / directory_name).mkdir()
+    if force:
+        (working / directory_name).mkdir(exist_ok=True)
+        (working / directory_name / "basic.py").write_text(
+            "# replace me\n", encoding="utf-8",
+        )
 
-    result = CliRunner().invoke(cli.app, ["example", "copy", "basic", directory_name])
+    result = CliRunner().invoke(
+        cli.app,
+        ["example", "copy", "basic", directory_name] + (["--force"] if force else []),
+    )
 
     assert result.exit_code == 0, result.output
     assert "st.title" in (working / directory_name / "basic.py").read_text(

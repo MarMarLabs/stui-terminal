@@ -15,6 +15,7 @@ from pathlib import Path
 class _Directory:
     path: Path
     fd: int | None
+    lock: ExitStack | None = None
 
     def entry(self, name: str) -> str | Path:
         return name if self.fd is not None else self.path / name
@@ -58,7 +59,9 @@ def _pin_windows_directory(
     )
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
-    stack.callback(kernel.CloseHandle, handle)
+    lock = ExitStack()
+    lock.callback(kernel.CloseHandle, handle)
+    stack.callback(lock.close)
     attributes = (wintypes.DWORD * 2)()
     # FileAttributeTagInfo = 9; reject junctions and other reparse points.
     if not kernel.GetFileInformationByHandleEx(
@@ -67,7 +70,7 @@ def _pin_windows_directory(
         raise ctypes.WinError(ctypes.get_last_error())
     if attributes[0] & 0x400 or not attributes[0] & 0x10:
         raise NotADirectoryError(f"not a plain directory: {path}")
-    return _Directory(path, None)
+    return _Directory(path, None, lock)
 
 
 def _create_file(directory: _Directory, name: str) -> int:
@@ -105,10 +108,10 @@ def _create_windows_file(
 
 def _pin_directory(
     path: Path, stack: ExitStack, parent: _Directory | None = None,
-    name: str | None = None, *, share_write: bool = False,
+    name: str | None = None,
 ) -> _Directory:
     if os.name == "nt":
-        return _pin_windows_directory(path, stack, share_write=share_write)
+        return _pin_windows_directory(path, stack)
     access = getattr(os, "O_SEARCH", getattr(os, "O_PATH", os.O_RDONLY))
     fd = os.open(
         name if name is not None else path,
@@ -119,9 +122,7 @@ def _pin_directory(
     return _Directory(path, fd)
 
 
-def _parent_directory(
-    path: Path, stack: ExitStack, *, share_write: bool = False,
-) -> _Directory:
+def _parent_directory(path: Path, stack: ExitStack) -> _Directory:
     parent_path = path.parent.absolute()
     # macOS supplies these aliases in its root-owned filesystem namespace.
     # Resolve only that OS prefix, never links below an attacker-writable path.
@@ -131,23 +132,17 @@ def _parent_directory(
         parent_path = Path("/", parent_path.parts[1]).resolve().joinpath(
             *parent_path.parts[2:],
         )
-    directory = _pin_directory(
-        Path(parent_path.anchor), stack, share_write=share_write,
-    )
+    directory = _pin_directory(Path(parent_path.anchor), stack)
     for part in parent_path.parts[1:]:
         child = directory.path / part
         try:
-            directory = _pin_directory(
-                child, stack, directory, part, share_write=share_write,
-            )
+            directory = _pin_directory(child, stack, directory, part)
         except FileNotFoundError:
             try:
                 os.mkdir(directory.entry(part), dir_fd=directory.fd)
             except FileExistsError:
                 pass
-            directory = _pin_directory(
-                child, stack, directory, part, share_write=share_write,
-            )
+            directory = _pin_directory(child, stack, directory, part)
     return directory
 
 
@@ -218,20 +213,11 @@ def write_generated_file(
                         directory, f".stui-{secrets.token_hex(16)}.guard",
                         delete_on_close=True,
                     )
-                    # Reopen the whole chain before releasing any strict lock,
-                    # including aliases such as '.' that pin a directory twice.
-                    # Locked children keep ancestors nonempty; the guard keeps
-                    # the final directory nonempty until all cleanup is done.
-                    publish_stack = ExitStack()
-                    try:
-                        shared = _parent_directory(
-                            directory.path / name, publish_stack, share_write=True,
-                        )
-                    except BaseException:
-                        publish_stack.close()
-                        raise
-                    stack.close()
-                    stack.callback(publish_stack.close)
+                    shared = _pin_windows_directory(
+                        directory.path, stack, share_write=True,
+                    )
+                    assert directory.lock is not None
+                    directory.lock.close()
                     directory = shared
                 os.replace(
                     directory.entry(temporary), directory.entry(name),
