@@ -5,7 +5,7 @@ import subprocess
 import pytest
 from typer.testing import CliRunner
 
-from stui import cli
+from stui import _file_generation, cli
 
 
 @pytest.fixture(params=["init", "copy", "copy-directory"])
@@ -68,17 +68,17 @@ def test_generators_leaf_swap_before_commit(generator, tmp_path, monkeypatch, fo
     args, destination = generator
     victim = tmp_path / "victim.py"
     victim.write_text("# keep me\n", encoding="utf-8")
-    original_open = os.open
+    original_create = _file_generation._create_file
     swapped = False
 
-    def swap_before_open(path, flags, *args, **kwargs):
+    def swap_before_create(directory, name):
         nonlocal swapped
-        if flags & os.O_CREAT and not swapped:
+        if not swapped:
             destination.symlink_to(victim)
             swapped = True
-        return original_open(path, flags, *args, **kwargs)
+        return original_create(directory, name)
 
-    monkeypatch.setattr(os, "open", swap_before_open)
+    monkeypatch.setattr(_file_generation, "_create_file", swap_before_create)
     result = CliRunner().invoke(cli.app, args + (["--force"] if force else []))
 
     assert swapped
@@ -95,13 +95,13 @@ def test_generators_parent_swap_before_commit(generator, tmp_path, monkeypatch, 
     redirected.mkdir()
     victim = redirected / destination.name
     victim.write_text("# keep me\n", encoding="utf-8")
-    original_open = os.open
+    original_create = _file_generation._create_file
     attempted = False
     swapped = False
 
-    def swap_before_open(path, flags, *args, **kwargs):
+    def swap_before_create(parent, name):
         nonlocal attempted, swapped
-        if flags & os.O_CREAT and not attempted:
+        if not attempted:
             attempted = True
             try:
                 directory.rename(moved)
@@ -111,9 +111,9 @@ def test_generators_parent_swap_before_commit(generator, tmp_path, monkeypatch, 
             else:
                 directory.symlink_to(redirected, target_is_directory=True)
                 swapped = True
-        return original_open(path, flags, *args, **kwargs)
+        return original_create(parent, name)
 
-    monkeypatch.setattr(os, "open", swap_before_open)
+    monkeypatch.setattr(_file_generation, "_create_file", swap_before_create)
     result = CliRunner().invoke(cli.app, args + (["--force"] if force else []))
 
     assert attempted
@@ -254,11 +254,8 @@ def test_copy_does_not_follow_directory_symlink(tmp_path, name, force):
     )
 
     assert victim.read_text(encoding="utf-8") == "# keep me\n"
-    if force and name.endswith(".py"):
-        assert result.exit_code == 0, result.output
-        assert not destination.is_symlink()
-    else:
-        assert result.exit_code != 0
+    assert result.exit_code != 0
+    assert destination.is_symlink()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows directory handle sharing")
@@ -276,21 +273,21 @@ def test_windows_ancestors_cannot_be_opened_for_reparse_writes(
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
     )
     create.restype = wintypes.HANDLE
-    original_open = os.open
+    original_create = _file_generation._create_file
     attempted = False
 
-    def try_write_handles(path, flags, *args, **kwargs):
+    def try_write_handles(directory, name):
         nonlocal attempted
-        if flags & os.O_CREAT and not attempted:
+        if not attempted:
             attempted = True
             for ancestor in (destination.parent, destination.parent.parent):
                 # GENERIC_WRITE, all sharing, OPEN_EXISTING, BACKUP_SEMANTICS.
                 handle = create(str(ancestor), 0x40000000, 7, None, 3, 0x02000000, None)
                 assert handle == wintypes.HANDLE(-1).value
                 assert ctypes.get_last_error() == 32  # ERROR_SHARING_VIOLATION
-        return original_open(path, flags, *args, **kwargs)
+        return original_create(directory, name)
 
-    monkeypatch.setattr(os, "open", try_write_handles)
+    monkeypatch.setattr(_file_generation, "_create_file", try_write_handles)
     result = CliRunner().invoke(cli.app, args + ["--force"])
 
     assert attempted

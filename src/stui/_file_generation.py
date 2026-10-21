@@ -20,9 +20,7 @@ class _Directory:
         return name if self.fd is not None else self.path / name
 
 
-def _pin_windows_directory(path: Path, stack: ExitStack) -> _Directory:
-    # Python's dir_fd operations are unavailable on Windows. Keep every ancestor
-    # open without write/delete sharing instead, including while publishing.
+def _windows_kernel():
     import ctypes
     from ctypes import wintypes
 
@@ -41,18 +39,56 @@ def _pin_windows_directory(path: Path, stack: ExitStack) -> _Directory:
         wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
     )
     info.restype = wintypes.BOOL
+    return kernel
+
+
+def _pin_windows_directory(path: Path, stack: ExitStack) -> _Directory:
+    # Python's dir_fd operations are unavailable on Windows. Keep every ancestor
+    # open without write/delete sharing instead, including while publishing.
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = _windows_kernel()
     # OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT.
-    handle = create(str(path), 0, 1, None, 3, 0x02200000, None)
+    # FILE_TRAVERSE participates in sharing checks; metadata-only access does not.
+    handle = kernel.CreateFileW(str(path), 0x20, 1, None, 3, 0x02200000, None)
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
-    stack.callback(close, handle)
+    stack.callback(kernel.CloseHandle, handle)
     attributes = (wintypes.DWORD * 2)()
     # FileAttributeTagInfo = 9; reject junctions and other reparse points.
-    if not info(handle, 9, attributes, ctypes.sizeof(attributes)):
+    if not kernel.GetFileInformationByHandleEx(
+        handle, 9, attributes, ctypes.sizeof(attributes),
+    ):
         raise ctypes.WinError(ctypes.get_last_error())
     if attributes[0] & 0x400 or not attributes[0] & 0x10:
         raise NotADirectoryError(f"not a plain directory: {path}")
     return _Directory(path, None)
+
+
+def _create_file(directory: _Directory, name: str) -> int:
+    if os.name != "nt":
+        return os.open(
+            directory.entry(name), os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o666, dir_fd=directory.fd,
+        )
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = _windows_kernel()
+    # GENERIC_WRITE, FILE_SHARE_READ, CREATE_NEW, OPEN_REPARSE_POINT | NORMAL.
+    # The CRT's os.open can follow a dangling symlink despite O_EXCL.
+    handle = kernel.CreateFileW(
+        str(directory.entry(name)), 0x40000000, 1, None, 1, 0x00200080, None,
+    )
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
 
 
 def _pin_directory(
@@ -129,16 +165,22 @@ def write_generated_file(
         elif is_directory:
             raise IsADirectoryError(str(path))
 
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if existing is not None and stat.S_ISLNK(existing.st_mode):
+            try:
+                target = os.stat(directory.entry(name), dir_fd=directory.fd)
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISDIR(target.st_mode):
+                    raise IsADirectoryError(str(path))
+
         if not force:
-            fd = os.open(directory.entry(name), flags, 0o666, dir_fd=directory.fd)
+            fd = _create_file(directory, name)
             with os.fdopen(fd, "w", encoding="utf-8") as output:
                 output.write(content)
         else:
             temporary = f".stui-{secrets.token_hex(16)}.tmp"
-            fd = os.open(
-                directory.entry(temporary), flags, 0o666, dir_fd=directory.fd,
-            )
+            fd = _create_file(directory, temporary)
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as output:
                     if (
