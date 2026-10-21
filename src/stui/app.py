@@ -75,8 +75,8 @@ from .elements import (
     ToggleElement,
     WriteElement,
 )
-from .path_input import _visible_path_text
-from .runtime import Runtime
+from .path_input import _validate_path_text, _visible_path_text
+from .runtime import ApiUsageError, Runtime
 from .widgets.data_explorer import DataExplorerScreen
 from .widgets.data_table import StuiDataTable
 from .widgets.slider import StuiSlider
@@ -274,6 +274,11 @@ class StuiPathInput(Input):
         )
 
     def replace(self, text: str, start: int, end: int) -> None:
+        try:
+            _validate_path_text(text)
+        except ApiUsageError as exc:
+            self.notify(str(exc), severity="error")
+            return
         super().replace(_visible_path_text(text), start, end)
 
 

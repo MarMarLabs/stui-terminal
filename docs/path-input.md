@@ -84,6 +84,11 @@ Inside `st.form`, edits and callbacks remain pending until
 edits. Terminal control characters are rendered as visible escape text before
 they can reach widget state or callbacks.
 
+Paths containing Unicode surrogates, including undecodable filesystem bytes,
+are rejected rather than converted into a different filename. This also applies
+to roots and expanded home directories. Pasting such text leaves the field
+unchanged and shows an error. Printable Unicode paths remain supported.
+
 ## Browsing And Platforms
 
 The `browse` flag is retained in the experimental call shape, but this initial

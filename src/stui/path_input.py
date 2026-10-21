@@ -18,26 +18,43 @@ def _visible_path_text(value: object) -> str:
     )
 
 
+def _validate_path_text(value: str) -> None:
+    if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        from .runtime import ApiUsageError
+
+        raise ApiUsageError(
+            "st.path_input paths must not contain surrogate characters."
+        )
+
+
 def _normalize_root(
     root: str | PathLike[str] | None,
     script_directory: Path,
 ) -> str:
     raw_root = os.fspath(script_directory if root is None else root)
-    root_text = _visible_path_text(os.fsdecode(raw_root))
+    root_text = os.fsdecode(raw_root)
+    _validate_path_text(root_text)
+    root_text = _visible_path_text(root_text)
     expanded = os.path.expanduser(root_text)
     if not os.path.isabs(expanded):
         expanded = os.path.join(str(script_directory), expanded)
-    return os.path.abspath(expanded)
+    normalized = os.path.abspath(expanded)
+    _validate_path_text(normalized)
+    return normalized
 
 
 def _normalize_path(value: object, *, root: str) -> str:
-    raw_value = _visible_path_text(value)
+    raw_value = str(value)
+    _validate_path_text(raw_value)
+    raw_value = _visible_path_text(raw_value)
     if raw_value == "":
         return ""
     expanded = os.path.expanduser(raw_value)
     if not os.path.isabs(expanded):
         expanded = os.path.join(root, expanded)
-    return os.path.abspath(expanded)
+    normalized = os.path.abspath(expanded)
+    _validate_path_text(normalized)
+    return normalized
 
 
 def _normalize_extensions(
