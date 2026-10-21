@@ -3,10 +3,16 @@
 `stui inspect` runs a local stui app without launching the interactive TUI and
 reports structural diagnostics about the run.
 
-User-script stdout and stderr are discarded during inspection so `--json`
-always remains one parseable report and app output cannot leak into either
-format. Human-readable paths neutralize terminal controls; JSON keeps exact
-paths as ordinary escaped JSON strings.
+Inspection runs in a dedicated child process with stdout and stderr discarded
+for its entire lifetime, including native writes and inherited subprocess
+streams. The parent reads the count-only report through a separate temporary
+file, so `--json` remains one parseable report. Human-readable paths neutralize
+terminal controls; JSON keeps exact paths as ordinary escaped JSON strings.
+
+Inspection is non-interactive: the child has no user input, and its remaining
+threads end when the final snapshot is written. App exit hooks are not run.
+This isolates report output; inspected apps still have the caller's local OS
+permissions, including access to files and other output destinations.
 
 ```bash
 stui inspect APP.py
@@ -65,7 +71,10 @@ Paths are included because they are part of the diagnostic contract. Treat the
 report as local developer output when path disclosure matters.
 
 Script failures use `script_error` without embedding the traceback or exception
-message. Use `stui check APP.py` when a full local traceback is needed.
+message, including `SystemExit` and other script-originated `BaseException`
+failures. If the child exits before writing a report, inspection returns
+`script_error` with no completed runs and a null run number. Use
+`stui check APP.py` when a full local traceback is needed.
 
 ## Cache Counters
 

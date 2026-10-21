@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import os
 import platform
+import subprocess
+import sys
 import time
 from collections import Counter
-from contextlib import redirect_stderr, redirect_stdout
 from importlib import metadata
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from . import __version__
 from .cache import cache_info
@@ -36,16 +40,6 @@ from .elements import (
 from .runtime import Runtime
 
 _perf_counter = time.perf_counter
-
-
-class _DiscardTextOutput:
-    encoding = "utf-8"
-
-    def write(self, value: str) -> int:
-        return len(value)
-
-    def flush(self) -> None:
-        pass
 
 _WIDGET_ELEMENTS = (
     ButtonElement,
@@ -295,28 +289,111 @@ def inspect_script(
     input_script = Path(script).expanduser()
     invalid_kind = _invalid_script_kind(input_script)
     if invalid_kind is not None:
-        return _report(
-            paths={
-                "input": str(input_script),
-                "script": None,
-                "project_root": None,
-                "local_modules": [],
-                "watch_files": [],
-            },
+        return _failed_inspection_report(
+            input_script,
             strict=strict,
             repeat=repeat,
-            runs=[],
-            run_timings=[],
-            final_snapshot=_empty_snapshot(),
-            total_elements=0,
-            total_widgets=0,
-            warnings=[],
-            errors=[{"code": invalid_kind, "run": None}],
-            status="invalid_script",
-            exit_code=2,
+            invalid_kind=invalid_kind,
             started_at=started_at,
         )
 
+    # Start fresh so app threads, native writers, and inherited subprocess streams
+    # never share the report destination or the embedding process's stream globals.
+    package_root = str(Path(__file__).resolve().parent.parent)
+    request = {
+        "script": str(input_script),
+        "strict": strict,
+        "repeat": repeat,
+        "sys_path": sys.path,
+        "argv": sys.argv,
+    }
+    with TemporaryDirectory(prefix="stui-inspect-") as directory:
+        report_path = Path(directory) / "report.json"
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    *subprocess._args_from_interpreter_flags(),
+                    "-c",
+                    "import json, sys; request = json.load(sys.stdin); "
+                    "sys.path[:] = request['sys_path']; "
+                    "sys.path.insert(0, sys.argv[1]); "
+                    "from stui.diagnostics import _inspect_worker; "
+                    "_inspect_worker(sys.argv[2], request)",
+                    package_root,
+                    str(report_path),
+                ],
+                input=json.dumps(request),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                if (
+                    isinstance(report, dict)
+                    and report.get("schema_version") == "stui.inspect.v1"
+                ):
+                    report["timings"]["total_ms"] = _elapsed_ms(started_at)
+                    return report
+        except (OSError, ValueError):
+            pass
+
+    # Early process exits and failed report writes carry no app-owned message.
+    return _failed_inspection_report(
+        input_script, strict=strict, repeat=repeat, started_at=started_at,
+    )
+
+
+def _failed_inspection_report(
+    input_script: Path,
+    *,
+    strict: bool,
+    repeat: int,
+    started_at: float,
+    invalid_kind: str | None = None,
+) -> dict[str, object]:
+    return _report(
+        paths={
+            "input": str(input_script),
+            "script": None if invalid_kind else str(input_script.resolve()),
+            "project_root": None,
+            "local_modules": [],
+            "watch_files": [],
+        },
+        strict=strict,
+        repeat=repeat,
+        runs=[],
+        run_timings=[],
+        final_snapshot=_empty_snapshot(),
+        total_elements=0,
+        total_widgets=0,
+        warnings=[],
+        errors=[{"code": invalid_kind or "script_error", "run": None}],
+        status="invalid_script" if invalid_kind else "script_error",
+        exit_code=2 if invalid_kind else 1,
+        started_at=started_at,
+    )
+
+
+def _inspect_worker(report_path: str, request: dict[str, object]) -> None:
+    sys.path[:] = request["sys_path"]
+    sys.argv[:] = request["argv"]
+    report = _inspect_script(
+        Path(request["script"]), strict=request["strict"], repeat=request["repeat"],
+    )
+    with open(report_path, "w", encoding="utf-8") as output:
+        json.dump(report, output)
+    # Inspection owns this process. Do not wait for app threads or run app atexit
+    # hooks after the final snapshot; their output descriptors remain discarded.
+    os._exit(0)
+
+
+def _inspect_script(
+    input_script: Path, *, strict: bool, repeat: int,
+) -> dict[str, object]:
+    started_at = _perf_counter()
     runtime = Runtime(input_script.resolve())
     runs: list[dict[str, object]] = []
     run_timings: list[dict[str, object]] = []
@@ -328,9 +405,13 @@ def inspect_script(
 
     for run_number in range(1, repeat + 1):
         run_started_at = _perf_counter()
-        sink = _DiscardTextOutput()
-        with redirect_stdout(sink), redirect_stderr(sink):
+        try:
             runtime.run_script()
+        except BaseException:
+            # Runtime handles st.stop/st.rerun itself. Normalize script-originated
+            # SystemExit, KeyboardInterrupt, and custom BaseException subclasses.
+            runtime.elements = [ErrorElement("script_error")]
+            runtime.toasts = []
         run_timings.append(
             {"run": run_number, "duration_ms": _elapsed_ms(run_started_at)}
         )
