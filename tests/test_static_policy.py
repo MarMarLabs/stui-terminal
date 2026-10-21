@@ -12,6 +12,7 @@ PYPROJECT = ROOT / "pyproject.toml"
 PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish.yml"
 PUBLISHING_DOC = ROOT / "docs" / "publishing.md"
 RELEASE_CHECKLIST = ROOT / "docs" / "release-checklist.md"
+RELEASE_NOTES = ROOT / "docs" / "releases"
 VERIFY_CUSTOM_PROJECT = ROOT / "scripts" / "verify_custom_project.sh"
 VERIFY_V220_PROJECT = ROOT / "scripts" / "verify_v220_project.py"
 
@@ -207,16 +208,22 @@ def test_release_verification_avoids_mixed_indexes_and_fixed_tmp_paths() -> None
         "/tmp/caching-v220.py",
         "/tmp/prompt-workbench-v220.py",
         "/tmp/stui-app.py",
+        "/tmp/stui-basic.py",
         "/tmp/stui-charts-app.py",
         "/tmp/stui-current",
         "/tmp/stui-data-app.py",
         "/tmp/stui-terminal-pypi",
         "/tmp/stui-terminal-testpypi",
+        "/tmp/stui-v1",
         "/tmp/stui-v220-workbench",
         "/tmp/stui-X.Y.Z-custom-project",
     }
     combined = "\n".join(
         [publishing, release_checklist, custom_script, v220_script]
+        + [
+            path.read_text(encoding="utf-8")
+            for path in sorted(RELEASE_NOTES.glob("*.md"))
+        ]
     )
     assert [path for path in sorted(fixed_paths) if path in combined] == []
     assert "shutil.rmtree" not in v220_script

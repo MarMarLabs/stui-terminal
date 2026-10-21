@@ -202,17 +202,23 @@ python -m build
 python -m twine check dist/*
 ```
 
-Then verify a clean PyPI install of the exact released version:
+Then verify a clean PyPI install of the exact released version in a new private
+temporary directory:
 
 ```bash
-python3.11 -m venv /tmp/stui-v1
-/tmp/stui-v1/bin/python -m pip install --upgrade pip
-/tmp/stui-v1/bin/python -m pip install --index-url https://pypi.org/simple --no-cache-dir stui-terminal==1.0.0
-/tmp/stui-v1/bin/python -c "import stui; print(stui.__version__)"
-/tmp/stui-v1/bin/stui --version
-/tmp/stui-v1/bin/stui doctor --json
-/tmp/stui-v1/bin/stui example copy basic /tmp/stui-basic.py
-/tmp/stui-v1/bin/python -m stui run /tmp/stui-basic.py
+(
+  set -eu
+  RELEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/stui-v1.XXXXXX")"
+  trap 'rm -rf "$RELEASE_TMP"' EXIT
+  python3.11 -m venv "$RELEASE_TMP/venv"
+  "$RELEASE_TMP/venv/bin/python" -m pip install --upgrade pip
+  "$RELEASE_TMP/venv/bin/python" -m pip install --index-url https://pypi.org/simple --no-cache-dir stui-terminal==1.0.0
+  "$RELEASE_TMP/venv/bin/python" -c "import stui; print(stui.__version__)"
+  "$RELEASE_TMP/venv/bin/stui" --version
+  "$RELEASE_TMP/venv/bin/stui" doctor --json
+  "$RELEASE_TMP/venv/bin/stui" example copy basic "$RELEASE_TMP/stui-basic.py"
+  "$RELEASE_TMP/venv/bin/python" -m stui run "$RELEASE_TMP/stui-basic.py"
+)
 ```
 
 Do not publish public launch announcements until the v1.0.0 package is live on

@@ -46,13 +46,17 @@ python -m build
 python -m twine check dist/*
 ```
 
-After publishing, verify a clean install:
+After publishing, verify a clean install in a new private temporary directory:
 
 ```bash
-python3.11 -m venv /tmp/stui-terminal-pypi
-. /tmp/stui-terminal-pypi/bin/activate
-python -m pip install --upgrade pip
-python -m pip install stui-terminal==0.2.1
-python -c "import stui; print(stui.__version__)"
-stui --version
+(
+  set -eu
+  RELEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/stui-pypi.XXXXXX")"
+  trap 'rm -rf "$RELEASE_TMP"' EXIT
+  python3.11 -m venv "$RELEASE_TMP/venv"
+  "$RELEASE_TMP/venv/bin/python" -m pip install --upgrade pip
+  "$RELEASE_TMP/venv/bin/python" -m pip install stui-terminal==0.2.1
+  "$RELEASE_TMP/venv/bin/python" -c "import stui; print(stui.__version__)"
+  "$RELEASE_TMP/venv/bin/stui" --version
+)
 ```
