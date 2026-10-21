@@ -81,7 +81,7 @@ class StuiSlider(Static, can_focus=True):
         id: str | None = None,
     ) -> None:
         classes = "stui-slider disabled" if disabled else "stui-slider"
-        super().__init__("", id=id, classes=classes)
+        super().__init__("", id=id, classes=classes, markup=False)
         self.label = label
         self.stui_key = key
         self.min_value = min_value

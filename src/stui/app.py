@@ -14,6 +14,7 @@ from rich.table import Table as RichTable
 from rich.text import Text
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
+from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.css.query import NoMatches
@@ -238,11 +239,11 @@ class StuiButton(Button):
     def __init__(self, element: ButtonElement) -> None:
         self.stui_key = element.key
         super().__init__(
-            _clip_text(element.label, MAX_WIDGET_LABEL_WIDTH),
+            Content(_clip_text(element.label, MAX_WIDGET_LABEL_WIDTH)),
             id=dom_id_for_key(element.key),
             disabled=element.disabled,
             tooltip=(
-                visible_terminal_text(element.help)
+                Content(visible_terminal_text(element.help))
                 if element.help is not None
                 else "Enter or Space activates. Tab and Shift+Tab move focus."
             ),
@@ -362,7 +363,7 @@ class StuiCheckbox(Checkbox):
     def __init__(self, element: CheckboxElement) -> None:
         self.stui_key = element.key
         super().__init__(
-            _clip_text(element.label, MAX_WIDGET_LABEL_WIDTH),
+            Content(_clip_text(element.label, MAX_WIDGET_LABEL_WIDTH)),
             value=element.value,
             id=dom_id_for_key(element.key),
             disabled=element.disabled,
@@ -392,6 +393,7 @@ class StuiSelectbox(Static, can_focus=True):
             self._render_value(),
             id=dom_id_for_key(element.key),
             classes="stui-selectbox",
+            markup=False,
         )
         self.disabled = element.disabled
 
@@ -438,6 +440,7 @@ class StuiRadioSet(Static, can_focus=True):
             self._render_value(),
             id=dom_id_for_key(element.key),
             classes="stui-radio",
+            markup=False,
         )
         self.disabled = element.disabled
 
@@ -507,6 +510,7 @@ class StuiMultiselect(Static, can_focus=True):
             self._render_value(),
             id=dom_id_for_key(element.key),
             classes="stui-multiselect",
+            markup=False,
         )
         self.disabled = element.disabled
 
@@ -578,6 +582,7 @@ class StuiExpander(Vertical, can_focus=True):
         label = Static(
             f"[{marker}] {_clip_text(element.label, available_label_width)}",
             classes="stui-expander-label",
+            markup=False,
         )
         super().__init__(
             label,
@@ -592,8 +597,34 @@ class StuiExpander(Vertical, can_focus=True):
         self.post_message(self.Changed(self, self.stui_expanded))
 
 
+class _LiteralSystemCommandsProvider(Provider):
+    """Keep command names literal through discovery and fuzzy highlighting."""
+
+    async def discover(self) -> Hits:
+        commands = sorted(
+            self.app.get_system_commands(self.screen), key=lambda command: command.title
+        )
+        for name, help_text, callback, discover in commands:
+            if discover:
+                yield DiscoveryHit(Content(name), callback, text=name, help=help_text)
+
+    async def search(self, query: str) -> Hits:
+        matcher = self.matcher(query)
+        for name, help_text, callback, *_ in self.app.get_system_commands(self.screen):
+            score, offsets = matcher.fuzzy_search.match(query, name)
+            if score > 0:
+                content = Content(name)
+                for offset in offsets:
+                    if not name[offset].isspace():
+                        content = content.stylize(
+                            matcher.match_style, offset, offset + 1
+                        )
+                yield Hit(score, content, callback, text=name, help=help_text)
+
+
 class StuiApp(App[None]):
     TITLE = "stui"
+    COMMANDS = {_LiteralSystemCommandsProvider}
     CSS = """
     Screen {
         background: #101014;
@@ -907,6 +938,7 @@ class StuiApp(App[None]):
             ),
             severity="error" if failed else "information",
             timeout=2,
+            markup=False,
         )
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
@@ -1159,7 +1191,7 @@ class StuiApp(App[None]):
         toasts = self.runtime.toasts
         self.runtime.toasts = []
         for toast in toasts:
-            self.notify(visible_terminal_text(toast), timeout=4)
+            self.notify(visible_terminal_text(toast), timeout=4, markup=False)
 
     def _build_widget(self, element, available_width: int | None = None):
         render_width = available_width or self.size.width or 80
@@ -1260,6 +1292,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.text, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-progress-label",
+                    markup=False,
                 ),
                 progress_bar,
                 classes="stui-progress",
@@ -1403,6 +1436,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 path_input,
             ]
@@ -1426,6 +1460,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 text_input,
                 classes="stui-field",
@@ -1440,6 +1475,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 text_area,
                 Static(
@@ -1457,6 +1493,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 number_input,
                 classes="stui-field",
@@ -1477,6 +1514,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_WIDGET_LABEL_WIDTH),
                     classes="stui-toggle-label",
+                    markup=False,
                 ),
                 classes="stui-toggle",
             )
@@ -1493,6 +1531,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 multiselect,
                 classes="stui-field",
@@ -1507,6 +1546,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 selectbox,
                 classes="stui-field",
@@ -1520,6 +1560,7 @@ class StuiApp(App[None]):
                 Static(
                     _clip_text(element.label, MAX_STATIC_LABEL_WIDTH),
                     classes="stui-field-label",
+                    markup=False,
                 ),
                 radio,
                 classes="stui-field",
@@ -1536,7 +1577,7 @@ class StuiApp(App[None]):
                 id=dom_id_for_key(element.key),
             )
             slider.tooltip = (
-                visible_terminal_text(element.help)
+                Content(visible_terminal_text(element.help))
                 if element.help is not None
                 else "Left/right arrows or h/l adjust. Home/End jump to min/max."
             )
@@ -1762,12 +1803,12 @@ class StuiApp(App[None]):
         table = RichTable(show_lines=False)
         for header in headers:
             table.add_column(
-                _clip_text(header, column_width),
+                Text(_clip_text(header, column_width)),
                 overflow="fold",
                 max_width=column_width,
             )
         for row in rows:
-            table.add_row(*(_clip_text(cell, column_width * 2) for cell in row))
+            table.add_row(*(Text(_clip_text(cell, column_width * 2)) for cell in row))
         return table
 
     @staticmethod

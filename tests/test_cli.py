@@ -355,6 +355,149 @@ def test_check_reports_runtime_error(tmp_path: Path) -> None:
     assert "RuntimeError: boom" in result.output
 
 
+@pytest.mark.parametrize(
+    "exception_type",
+    [
+        "RuntimeError",
+        "FileNotFoundError",
+        "SyntaxError",
+        "ApiUsageError",
+        "DuplicateWidgetKeyError",
+    ],
+)
+@pytest.mark.parametrize("repeat", [1, 3])
+def test_check_neutralizes_exception_controls_only_in_human_output(
+    tmp_path: Path, exception_type: str, repeat: int
+) -> None:
+    controls = "".join(
+        chr(codepoint)
+        for codepoint in (*range(0x20), *range(0x7F, 0xA0))
+        if codepoint not in {0x09, 0x0A}
+    )
+    message = (
+        "line 1\n\tλ\x1b[2J\x1b]0;title\x07"
+        "\x1b]52;c;U1RVSS1URVNU\x1b\\\x9b2J\x9d0;title\x9c"
+        + controls
+        + "END"
+    )
+    script = tmp_path / "app.py"
+    script.write_text(
+        "from stui.runtime import ApiUsageError, DuplicateWidgetKeyError\n"
+        f"raise {exception_type}({message!r})\n",
+        encoding="utf-8",
+    )
+    arguments = ["check", str(script), "--repeat", str(repeat)]
+
+    result = CliRunner().invoke(cli.app, arguments, color=True)
+
+    assert result.exit_code == 1
+    assert all(character not in result.output for character in controls)
+    assert "line 1\n\tλ" in result.output
+    assert "\\x1b[2J\\x1b]0;title\\x07" in result.output
+    assert "\\x1b]52;c;U1RVSS1URVNU\\x1b\\" in result.output
+    assert "\\x9b2J\\x9d0;title\\x9c" in result.output
+    assert "\\x00" in result.output
+    assert "\\x7f" in result.output
+    if exception_type == "RuntimeError":
+        assert "Traceback (most recent call last):\n" in result.output
+    if repeat > 1:
+        assert "run 1:\n" in result.output
+
+    json_result = CliRunner().invoke(cli.app, [*arguments, "--json"])
+
+    assert json_result.exit_code == 1
+    assert all(character not in json_result.output for character in controls)
+    payload = json.loads(json_result.output)
+    assert payload["status"] == "script_error"
+    assert message in payload["error"]["traceback"]
+    assert payload["script"]["path"] == str(script.resolve())
+
+
+@pytest.mark.parametrize(
+    ("body", "options", "status", "exit_code"),
+    [
+        ("import stui as st\nst.write('ready')\n", [], "passed:", 0),
+        ("raise RuntimeError('boom')\n", [], "failed:", 1),
+        ("", [], "passed with warnings:", 0),
+        ("", ["--strict"], "strict failed:", 1),
+    ],
+)
+def test_check_neutralizes_path_controls_in_human_headers(
+    monkeypatch,
+    tmp_path: Path,
+    body: str,
+    options: list[str],
+    status: str,
+    exit_code: int,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = Path("bad\x1b]0;title\x07\x9b2J\n\tname.py")
+    script.write_text(body, encoding="utf-8")
+
+    result = CliRunner().invoke(cli.app, ["check", str(script), *options], color=True)
+
+    assert result.exit_code == exit_code
+    assert "\x1b" not in result.output
+    assert "\x07" not in result.output
+    assert "\x9b" not in result.output
+    assert (
+        f"stui check {status} bad\\x1b]0;title\\x07\\x9b2J\\x0a\\x09name.py"
+        in result.output
+    )
+
+    json_result = CliRunner().invoke(
+        cli.app, ["check", str(script), *options, "--json"]
+    )
+
+    assert json_result.exit_code == exit_code
+    assert json.loads(json_result.output)["script"] == {
+        "input": str(script),
+        "path": str(script.resolve()),
+    }
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "not_python"])
+def test_check_neutralizes_invalid_path_controls(
+    monkeypatch, tmp_path: Path, kind: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = Path("bad\x1b]0;title\x07\x9b2J\n\tname.txt")
+    if kind == "directory":
+        script.mkdir()
+    elif kind == "not_python":
+        script.write_text("", encoding="utf-8")
+
+    result = CliRunner().invoke(cli.app, ["check", str(script)], color=True)
+
+    assert result.exit_code == 2
+    assert "\x1b]0;title" not in result.output
+    assert "\x07" not in result.output
+    assert "\x9b" not in result.output
+    assert "bad\\x1b]0;title\\x07\\x9b2J\\x0a\\x09name.txt" in result.output
+
+    json_result = CliRunner().invoke(cli.app, ["check", str(script), "--json"])
+
+    assert json_result.exit_code == 2
+    payload = json.loads(json_result.output)
+    assert payload["script"]["input"] == str(script)
+    assert str(script) in payload["error"]["traceback"]
+
+
+def test_check_missing_repo_example_preserves_multiline_guidance(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli.app, ["check", "examples/basic.py"])
+
+    assert result.exit_code == 2
+    assert "Bundled examples are available after installation" in result.output
+    assert "stui example copy basic examples/basic.py" in " ".join(
+        result.output.replace("│", "").split()
+    )
+    assert "\\x0a" not in result.output
+
+
 def test_check_json_reports_ok_and_errors(tmp_path: Path) -> None:
     script = tmp_path / "app.py"
     script.write_text("import stui as st\nst.write('ok')\n", encoding="utf-8")
